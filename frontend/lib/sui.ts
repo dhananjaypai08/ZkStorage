@@ -110,52 +110,88 @@ export function buildCreateReceiptTx(params: {
   retentionDays: number
   consentSigned?: boolean
 }): Transaction {
-  if (!params || typeof params !== "object") {
-    throw new Error("Invalid parameters: params must be an object")
+  if (!params) {
+    throw new Error("Parameters object is null or undefined")
   }
   
-  if (!params.commitment || typeof params.commitment !== "string") {
-    throw new Error("Invalid commitment: must be a non-empty string")
+  if (typeof params !== "object" || Array.isArray(params)) {
+    throw new Error("Parameters must be a plain object")
   }
   
-  if (!params.blobId || typeof params.blobId !== "string") {
-    throw new Error("Invalid blobId: must be a non-empty string")
+  const commitment = params.commitment ? String(params.commitment).trim() : ""
+  const blobId = params.blobId ? String(params.blobId).trim() : ""
+  const policyId = params.policyId ? String(params.policyId).trim() : ""
+  const retentionDays = Number(params.retentionDays) || 0
+  const consentSigned = Boolean(params.consentSigned)
+  
+  if (!commitment) {
+    throw new Error("Commitment is required and cannot be empty")
   }
   
-  if (!params.policyId || typeof params.policyId !== "string") {
-    throw new Error("Invalid policyId: must be a non-empty string")
+  if (!blobId) {
+    throw new Error("Blob ID is required and cannot be empty")
   }
   
-  if (typeof params.retentionDays !== "number" || params.retentionDays < 0) {
-    throw new Error("Invalid retentionDays: must be a non-negative number")
+  if (!policyId) {
+    throw new Error("Policy ID is required and cannot be empty")
+  }
+  
+  if (!Number.isInteger(retentionDays) || retentionDays < 0) {
+    throw new Error(`Invalid retention days: ${retentionDays}. Must be a non-negative integer.`)
   }
 
-  if (!PACKAGE_ID || PACKAGE_ID.length !== 66) {
-    throw new Error("Invalid PACKAGE_ID configuration")
+  if (!PACKAGE_ID) {
+    throw new Error("PACKAGE_ID is not configured")
   }
 
-  const tx = new Transaction()
-  const normalizedPackageId = PACKAGE_ID.toLowerCase()
+  const normalizedPackageId = String(PACKAGE_ID).toLowerCase().trim()
   
-  const commitmentBytes = Array.from(new TextEncoder().encode(params.commitment))
-  const blobIdBytes = Array.from(new TextEncoder().encode(params.blobId))
-  const policyIdBytes = Array.from(new TextEncoder().encode(params.policyId))
+  if (!normalizedPackageId.startsWith("0x") || normalizedPackageId.length !== 66) {
+    throw new Error(`Invalid package ID format: ${normalizedPackageId}. Expected 66 characters starting with 0x.`)
+  }
 
-  const target = `${normalizedPackageId}::${STORAGE_RECEIPT_MODULE}::create_and_transfer_receipt`
+  try {
+    const commitmentBytes = Array.from(new TextEncoder().encode(commitment))
+    const blobIdBytes = Array.from(new TextEncoder().encode(blobId))
+    const policyIdBytes = Array.from(new TextEncoder().encode(policyId))
 
-  tx.moveCall({
-    target,
-    arguments: [
+    if (commitmentBytes.length === 0 || blobIdBytes.length === 0 || policyIdBytes.length === 0) {
+      throw new Error("Encoded bytes cannot be empty")
+    }
+
+    const target = `${normalizedPackageId}::${STORAGE_RECEIPT_MODULE}::create_and_transfer_receipt`
+
+    const tx = new Transaction()
+    
+    if (!tx) {
+      throw new Error("Failed to create Transaction object")
+    }
+
+    const args = [
       tx.pure("vector<u8>", commitmentBytes),
       tx.pure("vector<u8>", blobIdBytes),
       tx.pure("vector<u8>", policyIdBytes),
-      tx.pure.u64(BigInt(params.retentionDays)),
-      tx.pure.bool(params.consentSigned ?? false),
+      tx.pure.u64(BigInt(retentionDays)),
+      tx.pure.bool(consentSigned),
       tx.object("0x6"),
-    ],
-  })
+    ]
 
-  return tx
+    if (!args || args.length !== 6) {
+      throw new Error("Failed to build transaction arguments")
+    }
+
+    tx.moveCall({
+      target,
+      arguments: args,
+    })
+
+    return tx
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Transaction build failed: ${error.message}`)
+    }
+    throw new Error("Transaction build failed: Unknown error")
+  }
 }
 
 export function buildSubmitProofTx(params: {

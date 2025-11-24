@@ -294,7 +294,8 @@ function VerifyPageContent() {
   }
 
   const getImageUrl = (data: Uint8Array, mimeType: string): string => {
-    const blob = new Blob([data], { type: mimeType })
+    const buffer = new Uint8Array(data).buffer
+    const blob = new Blob([buffer], { type: mimeType })
     return URL.createObjectURL(blob)
   }
 
@@ -553,7 +554,9 @@ function VerifyPageContent() {
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        const blob = new Blob([result.decryptedData!.data], {
+                        const data = result.decryptedData!.data
+                        const buffer = new Uint8Array(data).buffer
+                        const blob = new Blob([buffer], {
                           type: result.decryptedData!.mimeType,
                         })
                         const url = URL.createObjectURL(blob)
@@ -587,7 +590,9 @@ function VerifyPageContent() {
                     <Button
                       variant="outline"
                       onClick={() => {
-                        const blob = new Blob([result.decryptedData!.data], {
+                        const data = result.decryptedData!.data
+                        const buffer = new Uint8Array(data).buffer
+                        const blob = new Blob([buffer], {
                           type: result.decryptedData!.mimeType,
                         })
                         const url = URL.createObjectURL(blob)

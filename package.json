@@ -1,0 +1,23 @@
+{
+  "name": "zkstorage",
+  "version": "1.0.0",
+  "description": "A production-grade application combining Next.js, Walrus decentralized storage, Seal encryption with policies, and zero-knowledge proofs on Sui blockchain.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "frontend:build": "cd frontend && npm run build",
+    "prepare": "husky"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dhananjaypai08/ZkStorage.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/dhananjaypai08/ZkStorage/issues"
+  },
+  "homepage": "https://github.com/dhananjaypai08/ZkStorage#readme"
+}

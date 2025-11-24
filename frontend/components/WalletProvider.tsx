@@ -23,7 +23,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
-        <SuiWalletProvider autoConnect>
+        <SuiWalletProvider autoConnect storageKey="zkStorage-wallet">
           {children}
         </SuiWalletProvider>
       </SuiClientProvider>

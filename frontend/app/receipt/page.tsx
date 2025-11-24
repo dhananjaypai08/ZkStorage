@@ -423,7 +423,7 @@ function ReceiptPageContent() {
 
                       signAndExecute(
                         {
-                          transaction,
+                          transaction: transaction as unknown as Parameters<typeof signAndExecute>[0]['transaction'],
                         },
                         {
                           onSuccess: (result) => {

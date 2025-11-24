@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useRef } from "react"
 import Link from "next/link"
 import { useDropzone } from "react-dropzone"
 import {
@@ -62,6 +62,7 @@ export default function UploadPage() {
   const [error, setError] = useState<string | null>(null)
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [receiptId, setReceiptId] = useState<string | null>(null)
+  const isExecutingRef = useRef(false)
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -466,7 +467,7 @@ export default function UploadPage() {
             </Card>
 
             {/* Create On-Chain Receipt Section */}
-            {!receiptId && (
+            {!receiptId && result && result.commitment && result.blobId && result.policyId && (
               <div className="pt-4 border-t border-zinc-800/40">
                 <p className="text-xs text-zinc-500 mb-3">Create On-Chain Receipt</p>
                 {!account ? (
@@ -478,7 +479,11 @@ export default function UploadPage() {
                   </div>
                 ) : (
                   <Button
-                    onClick={() => {
+                    onClick={async () => {
+                      if (isExecutingRef.current) {
+                        return
+                      }
+
                       if (!account) {
                         toast({
                           title: "Wallet Not Connected",
@@ -488,56 +493,103 @@ export default function UploadPage() {
                         return
                       }
 
-                      try {
-                        const transaction = buildCreateReceiptTx({
-                          commitment: result.commitment,
-                          blobId: result.blobId,
-                          policyId: result.policyId,
-                          retentionDays: result.retentionDays,
-                          consentSigned: result.consentSigned,
+                      if (!result) {
+                        toast({
+                          title: "No Upload Result",
+                          description: "Please complete the upload process first",
+                          variant: "destructive",
                         })
+                        return
+                      }
+
+                      if (!result.commitment || !result.blobId || !result.policyId) {
+                        toast({
+                          title: "Invalid Upload Data",
+                          description: "Missing required data from upload. Please try uploading again.",
+                          variant: "destructive",
+                        })
+                        return
+                      }
+
+                      isExecutingRef.current = true
+
+                      try {
+                        const txParams = {
+                          commitment: String(result.commitment),
+                          blobId: String(result.blobId),
+                          policyId: String(result.policyId),
+                          retentionDays: Number(result.retentionDays) || 30,
+                          consentSigned: Boolean(result.consentSigned),
+                        }
+
+                        if (!txParams.commitment || !txParams.blobId || !txParams.policyId) {
+                          throw new Error("Missing required transaction parameters")
+                        }
+
+                        const transaction = buildCreateReceiptTx(txParams)
+
+                        if (!transaction) {
+                          throw new Error("Failed to build transaction")
+                        }
 
                         signAndExecute(
                           {
-                            transaction,
+                            transaction: transaction as unknown as Parameters<typeof signAndExecute>[0]['transaction'],
                           },
-                        {
-                          onSuccess: (txResult) => {
-                            const txDigest = txResult.digest
-                            setReceiptId(txDigest)
-                            toast({
-                              title: "Receipt Created",
-                              description: "Storage receipt created successfully",
-                              variant: "success",
-                            })
-                          },
-                          onError: (error) => {
-                            console.error("Transaction error:", error)
-                            let errorMsg = error.message || "Failed to create receipt"
-                            
-                            // Check if it's a package/network issue
-                            if (errorMsg.includes("package") || errorMsg.includes("Package") || errorMsg.includes("unable to locate")) {
-                              errorMsg = "Package not found. Make sure your wallet is connected to Testnet network."
-                            }
-                            
-                            toast({
-                              title: "Transaction Failed",
-                              description: errorMsg,
-                              variant: "destructive",
-                            })
-                          },
-                        }
+                          {
+                            onSuccess: (txResult) => {
+                              isExecutingRef.current = false
+                              if (!txResult || !txResult.digest) {
+                                throw new Error("Invalid transaction result")
+                              }
+                              const txDigest = txResult.digest
+                              setReceiptId(txDigest)
+                              toast({
+                                title: "Receipt Created",
+                                description: "Storage receipt created successfully",
+                                variant: "success",
+                              })
+                            },
+                            onError: (error) => {
+                              isExecutingRef.current = false
+                              console.error("Transaction error:", error)
+                              let errorMsg = "Failed to create receipt"
+                              
+                              if (error && typeof error === "object") {
+                                if ("message" in error && error.message) {
+                                  errorMsg = String(error.message)
+                                } else if ("toString" in error) {
+                                  errorMsg = String(error)
+                                }
+                              } else if (error) {
+                                errorMsg = String(error)
+                              }
+                              
+                              if (errorMsg.includes("package") || errorMsg.includes("Package") || errorMsg.includes("unable to locate") || errorMsg.includes("not found")) {
+                                errorMsg = "Package not found. Ensure your wallet is on Testnet network."
+                              }
+                              
+                              toast({
+                                title: "Transaction Failed",
+                                description: errorMsg,
+                                variant: "destructive",
+                                duration: 8000,
+                              })
+                            },
+                          }
                         )
                       } catch (err) {
+                        isExecutingRef.current = false
                         console.error("Transaction build error:", err)
+                        const errorMessage = err instanceof Error ? err.message : String(err || "Unknown error")
                         toast({
                           title: "Transaction Error",
-                          description: err instanceof Error ? err.message : "Failed to build transaction",
+                          description: errorMessage,
                           variant: "destructive",
                         })
                       }
                     }}
-                    disabled={isCreatingReceipt}
+                    disabled={isCreatingReceipt || isExecutingRef.current}
                     className="w-full"
                   >
                     {isCreatingReceipt ? (
@@ -578,26 +630,15 @@ export default function UploadPage() {
                         <Copy className="w-3 h-3 text-zinc-500 hover:text-cyan-400" />
                       </button>
                     </div>
-                    <div className="flex gap-2">
-                      <a
-                        href={`https://suiscan.xyz/testnet/tx/${receiptId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-400 hover:bg-cyan-500/20 hover:border-cyan-500/40 transition-all"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        View on SuiScan
-                      </a>
-                      <a
-                        href={`https://suiexplorer.com/txblock/${receiptId}?network=testnet`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-xs text-white hover:bg-white/10 transition-all"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        Sui Explorer
-                      </a>
-                    </div>
+                    <button
+                      onClick={() => {
+                        window.open(`https://suiscan.xyz/testnet/tx/${receiptId}`, '_blank', 'noopener,noreferrer')
+                      }}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-400 hover:bg-cyan-500/20 hover:border-cyan-500/40 transition-all"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      View on SuiScan
+                    </button>
                   </div>
                 </div>
               </div>
