@@ -1,8 +1,8 @@
 {
   "network": "testnet",
-  "packageId": "0x0dbece3f879282e81274060838c48e6a9739a157aa14e91613e6128d13043554",
+  "packageId": "0x0e0dafd65a12c710882eb586ac9fc76416497453a3fa3169c6468de1775f1a4f",
   "deployedAt": "2025-01-24T00:00:00Z",
-  "txDigest": "96CJ7GVs4HiDtswZWqMao2kHsQJWwuzYmwb6Q4bv6zzx",
+  "txDigest": "7K72zC2NTfxqEsemyNc6g7y3qDVHB7NUcRMF3kkdM7eF",
   "modules": [
     "storage_receipt",
     "proof_verifier",

@@ -37,7 +37,7 @@ import { toast } from "@/lib/use-toast"
 import { useSignAndExecuteTransaction } from "@mysten/dapp-kit"
 import { buildCreateReceiptTx } from "@/lib/sui"
 import { useCurrentAccount } from "@mysten/dapp-kit"
-import { WalletButton } from "@/components/WalletButton"
+import { WalletDisplay } from "@/components/WalletDisplay"
 
 function ReceiptPageContent() {
   const searchParams = useSearchParams()
@@ -158,7 +158,7 @@ function ReceiptPageContent() {
             <Link href="/verify" className="text-sm text-zinc-400 hover:text-white transition-colors">
               Verify
             </Link>
-            <WalletButton />
+            <WalletDisplay />
           </nav>
         </div>
       </header>

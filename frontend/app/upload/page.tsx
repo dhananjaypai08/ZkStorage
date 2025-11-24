@@ -29,7 +29,7 @@ import { createCommitmentWithMetadata } from "@/lib/merkle"
 import { createPolicy, encryptWithSeal, serializeEnvelope, type SealPolicy } from "@/lib/seal"
 import { uploadToWalrus, daysToEpochs } from "@/lib/walrus"
 import { toast } from "@/lib/use-toast"
-import { WalletButton } from "@/components/WalletButton"
+import { WalletDisplay } from "@/components/WalletDisplay"
 import { useSignAndExecuteTransaction } from "@mysten/dapp-kit"
 import { useCurrentAccount } from "@mysten/dapp-kit"
 import { buildCreateReceiptTx } from "@/lib/sui"
@@ -211,7 +211,7 @@ export default function UploadPage() {
             <Link href="/verify" className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
               Verify
             </Link>
-            <WalletButton />
+            <WalletDisplay />
           </nav>
         </div>
       </header>
@@ -474,16 +474,10 @@ export default function UploadPage() {
                     <p className="text-xs text-amber-400 mb-2">
                       Connect your wallet to create an on-chain receipt
                     </p>
-                    <WalletButton />
+                    <WalletDisplay />
                   </div>
                 ) : (
-                  <>
-                    <div className="mb-3 p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
-                      <p className="text-xs text-cyan-400">
-                        ⚠️ Make sure your wallet is on <strong>Testnet</strong> network
-                      </p>
-                    </div>
-                    <Button
+                  <Button
                     onClick={() => {
                       if (!account) {
                         toast({
@@ -494,22 +488,19 @@ export default function UploadPage() {
                         return
                       }
 
-                      const transaction = buildCreateReceiptTx({
-                        commitment: result.commitment,
-                        blobId: result.blobId,
-                        policyId: result.policyId,
-                        retentionDays: result.retentionDays,
-                        consentSigned: result.consentSigned,
-                      })
+                      try {
+                        const transaction = buildCreateReceiptTx({
+                          commitment: result.commitment,
+                          blobId: result.blobId,
+                          policyId: result.policyId,
+                          retentionDays: result.retentionDays,
+                          consentSigned: result.consentSigned,
+                        })
 
-                      signAndExecute(
-                        {
-                          transaction,
-                          options: {
-                            showEffects: true,
-                            showEvents: true,
+                        signAndExecute(
+                          {
+                            transaction,
                           },
-                        },
                         {
                           onSuccess: (txResult) => {
                             const txDigest = txResult.digest
@@ -536,7 +527,15 @@ export default function UploadPage() {
                             })
                           },
                         }
-                      )
+                        )
+                      } catch (err) {
+                        console.error("Transaction build error:", err)
+                        toast({
+                          title: "Transaction Error",
+                          description: err instanceof Error ? err.message : "Failed to build transaction",
+                          variant: "destructive",
+                        })
+                      }
                     }}
                     disabled={isCreatingReceipt}
                     className="w-full"
@@ -553,7 +552,6 @@ export default function UploadPage() {
                       </>
                     )}
                   </Button>
-                  </>
                 )}
               </div>
             )}

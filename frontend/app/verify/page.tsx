@@ -28,7 +28,7 @@ import { checkBlobExists, retrieveFromWalrus } from "@/lib/walrus"
 import { toast } from "@/lib/use-toast"
 import { deserializeEnvelope, decryptWithSeal, type SealPolicy } from "@/lib/seal"
 import { createSuiClient, verifyReceipt } from "@/lib/sui"
-import { WalletButton } from "@/components/WalletButton"
+import { WalletDisplay } from "@/components/WalletDisplay"
 
 type VerificationStatus = "idle" | "verifying" | "success" | "failed"
 
@@ -323,7 +323,7 @@ function VerifyPageContent() {
             <Link href="/receipt" className="text-sm text-zinc-400 hover:text-white transition-colors">
               Generate Receipt
             </Link>
-            <WalletButton />
+            <WalletDisplay />
           </nav>
         </div>
       </header>
