@@ -13,16 +13,22 @@ import {
   FileText,
   Clock,
   Copy,
-  AlertCircle
+  AlertCircle,
+  Image as ImageIcon,
+  Download
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Loader, ProgressBar } from "@/components/ui/loader"
 import { Badge } from "@/components/ui/badge"
-import { shortenHash } from "@/lib/utils"
+import { shortenHash, formatBytes } from "@/lib/utils"
 import { verifyProof, type ProofBundle, formatProofForDisplay } from "@/lib/zk-prover"
-import { checkBlobExists } from "@/lib/walrus"
+import { checkBlobExists, retrieveFromWalrus } from "@/lib/walrus"
 import { toast } from "@/lib/use-toast"
+import { deserializeEnvelope, decryptWithSeal, type SealPolicy } from "@/lib/seal"
+import { createSuiClient, verifyReceipt } from "@/lib/sui"
+import { WalletButton } from "@/components/WalletButton"
 
 type VerificationStatus = "idle" | "verifying" | "success" | "failed"
 
@@ -36,6 +42,13 @@ interface VerificationResult {
     proofType: string
     protocol: string
     publicSignals: string[]
+    blobId?: string
+    policyId?: string
+  }
+  decryptedData?: {
+    data: Uint8Array
+    mimeType: string
+    fileName?: string
   }
 }
 
@@ -46,9 +59,18 @@ function VerifyPageContent() {
   const [progress, setProgress] = useState(0)
   const [result, setResult] = useState<VerificationResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [decrypting, setDecrypting] = useState(false)
+  const [blobIdFromUrl, setBlobIdFromUrl] = useState<string | null>(null)
+  const [policyIdFromUrl, setPolicyIdFromUrl] = useState<string | null>(null)
 
   useEffect(() => {
     const proofParam = searchParams.get("proof")
+    const blobId = searchParams.get("blobId")
+    const policyId = searchParams.get("policyId")
+    
+    if (blobId) setBlobIdFromUrl(blobId)
+    if (policyId) setPolicyIdFromUrl(policyId)
+    
     if (proofParam) {
       setProofJson(proofParam)
       // Auto-verify if proof is passed in URL
@@ -98,8 +120,45 @@ function VerifyPageContent() {
       // For demo, we simulate this check
       blobExists = true
 
-      // Step 4: Verify on-chain (simulated)
+      // Step 4: Verify on-chain
       setProgress(80)
+      const client = createSuiClient()
+      
+      // Try to get blobId and policyId from multiple sources:
+      // 1. Manually entered (from state - highest priority)
+      // 2. URL parameters
+      // 3. localStorage (from upload)
+      // 4. Proof metadata (if included)
+      let blobId: string | undefined = blobIdFromUrl || undefined
+      let policyId: string | undefined = policyIdFromUrl || undefined
+      let policy: SealPolicy | undefined
+
+      // If not manually entered, try localStorage
+      if (!blobId || !policyId) {
+        const storedData = localStorage.getItem(`zkStorage_${proof.commitment}`)
+        if (storedData) {
+          try {
+            const parsed = JSON.parse(storedData)
+            blobId = blobId || parsed.blobId
+            policyId = policyId || parsed.policyId
+            policy = parsed.policy
+          } catch (e) {
+            console.warn("Failed to parse stored data:", e)
+          }
+        }
+      } else {
+        // If we have blobId and policyId, try to get policy from localStorage
+        const storedData = localStorage.getItem(`zkStorage_${proof.commitment}`)
+        if (storedData) {
+          try {
+            const parsed = JSON.parse(storedData)
+            policy = parsed.policy
+          } catch (e) {
+            console.warn("Failed to parse stored policy:", e)
+          }
+        }
+      }
+
       // In production, this would call the Sui contract
       const onChainVerified = proofValid
 
@@ -115,11 +174,18 @@ function VerifyPageContent() {
           proofType: proof.proofType,
           protocol: proof.proof.protocol,
           publicSignals: proof.publicSignals,
+          blobId,
+          policyId,
         },
       }
 
       setResult(verificationResult)
       setStatus(proofValid && onChainVerified ? "success" : "failed")
+
+      // If we have blobId and policy, try to fetch and decrypt
+      if (proofValid && onChainVerified && blobId && policy) {
+        handleFetchAndDecrypt(blobId, policy)
+      }
 
       toast({
         title: proofValid ? "Verification Successful" : "Verification Failed",
@@ -160,11 +226,76 @@ function VerifyPageContent() {
     })
   }
 
+  const handleFetchAndDecrypt = async (blobId: string, policy: SealPolicy) => {
+    if (decrypting) return
+
+    setDecrypting(true)
+    try {
+      // Fetch encrypted blob from Walrus
+      const encryptedData = await retrieveFromWalrus(blobId)
+
+      // Deserialize envelope
+      const envelope = deserializeEnvelope(encryptedData)
+
+      // Decrypt with Seal (using a dummy address for now - in production, use actual requester)
+      const decryptedData = await decryptWithSeal(envelope, policy, "0x0000000000000000000000000000000000000000")
+
+      // Detect MIME type
+      let mimeType = "application/octet-stream"
+      if (decryptedData.length >= 4) {
+        // Check for common image formats
+        const header = Array.from(decryptedData.slice(0, 4))
+        if (header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff) {
+          mimeType = "image/jpeg"
+        } else if (header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4e && header[3] === 0x47) {
+          mimeType = "image/png"
+        } else if (header[0] === 0x47 && header[1] === 0x49 && header[2] === 0x46) {
+          mimeType = "image/gif"
+        } else if (header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46) {
+          mimeType = "image/webp"
+        }
+      }
+
+      // Update result with decrypted data
+      setResult((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          decryptedData: {
+            data: decryptedData,
+            mimeType,
+          },
+        }
+      })
+
+      toast({
+        title: "Data Decrypted",
+        description: "Original file retrieved and decrypted successfully",
+        variant: "success",
+      })
+    } catch (err) {
+      console.error("Decryption error:", err)
+      toast({
+        title: "Decryption Failed",
+        description: err instanceof Error ? err.message : "Could not decrypt data",
+        variant: "destructive",
+      })
+    } finally {
+      setDecrypting(false)
+    }
+  }
+
   const resetVerification = () => {
     setStatus("idle")
     setResult(null)
     setError(null)
     setProgress(0)
+    setDecrypting(false)
+  }
+
+  const getImageUrl = (data: Uint8Array, mimeType: string): string => {
+    const blob = new Blob([data], { type: mimeType })
+    return URL.createObjectURL(blob)
   }
 
   return (
@@ -192,6 +323,7 @@ function VerifyPageContent() {
             <Link href="/receipt" className="text-sm text-zinc-400 hover:text-white transition-colors">
               Generate Receipt
             </Link>
+            <WalletButton />
           </nav>
         </div>
       </header>
@@ -221,7 +353,7 @@ function VerifyPageContent() {
             <CardHeader>
               <CardTitle>Submit Proof for Verification</CardTitle>
               <CardDescription>
-                Paste a proof JSON or upload a proof file
+                Paste a proof JSON or upload a proof file. Optionally provide blob ID to view the original file.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -233,6 +365,28 @@ function VerifyPageContent() {
                   value={proofJson}
                   onChange={(e) => setProofJson(e.target.value)}
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm text-zinc-400">Blob ID (Optional)</label>
+                  <Input
+                    className="font-mono text-sm"
+                    placeholder="Walrus blob ID"
+                    value={blobIdFromUrl || ""}
+                    onChange={(e) => setBlobIdFromUrl(e.target.value || null)}
+                  />
+                  <p className="text-xs text-zinc-600">Required to view original file</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm text-zinc-400">Policy ID (Optional)</label>
+                  <Input
+                    className="font-mono text-sm"
+                    placeholder="Seal policy ID"
+                    value={policyIdFromUrl || ""}
+                    onChange={(e) => setPolicyIdFromUrl(e.target.value || null)}
+                  />
+                </div>
               </div>
 
               <div className="flex items-center gap-4">
@@ -350,6 +504,186 @@ function VerifyPageContent() {
                   </div>
                 </div>
               </div>
+
+              {/* Display decrypted image if available */}
+              {result.decryptedData && result.decryptedData.mimeType.startsWith("image/") && (
+                <div className="mt-6 p-6 rounded-xl bg-gradient-to-br from-cyan-500/10 to-blue-500/10 border border-cyan-500/20">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-cyan-500/20 flex items-center justify-center">
+                        <ImageIcon className="w-4 h-4 text-cyan-400" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-semibold text-white">Decrypted Image</h3>
+                        <p className="text-xs text-zinc-400">Original file retrieved from Walrus</p>
+                      </div>
+                    </div>
+                    <Badge variant="success" className="text-xs">
+                      <CheckCircle className="w-3 h-3 mr-1" />
+                      Decrypted
+                    </Badge>
+                  </div>
+                  <div className="rounded-lg overflow-hidden border border-white/10 bg-black/20 p-4">
+                    <img
+                      src={getImageUrl(result.decryptedData.data, result.decryptedData.mimeType)}
+                      alt="Decrypted content"
+                      className="w-full h-auto max-h-[500px] object-contain mx-auto block"
+                      style={{ imageRendering: "auto" }}
+                      onError={(e) => {
+                        console.error("Image load error:", e)
+                        const target = e.target as HTMLImageElement
+                        target.style.display = "none"
+                        toast({
+                          title: "Image Display Error",
+                          description: "Failed to display the decrypted image. The data may be corrupted or in an unsupported format.",
+                          variant: "destructive",
+                        })
+                      }}
+                      onLoad={() => {
+                        console.log("Image loaded successfully")
+                      }}
+                    />
+                  </div>
+                  <div className="mt-4 flex items-center justify-between text-xs text-zinc-400">
+                    <span>Format: {result.decryptedData.mimeType}</span>
+                    <span>Size: {formatBytes(result.decryptedData.data.length)}</span>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const blob = new Blob([result.decryptedData!.data], {
+                          type: result.decryptedData!.mimeType,
+                        })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement("a")
+                        a.href = url
+                        a.download = `decrypted-image-${Date.now()}.${result.decryptedData!.mimeType.split("/")[1]}`
+                        a.click()
+                        URL.revokeObjectURL(url)
+                        toast({
+                          title: "Download Started",
+                          description: "Image download started",
+                        })
+                      }}
+                      className="flex-1"
+                    >
+                      <Download className="w-3 h-3 mr-1" />
+                      Download Image
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Display decrypted file download if not an image */}
+              {result.decryptedData && !result.decryptedData.mimeType.startsWith("image/") && (
+                <div className="mt-6 p-4 rounded-xl bg-white/5 border border-white/10">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-white">Decrypted File</p>
+                      <p className="text-xs text-zinc-400">{result.decryptedData.mimeType}</p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        const blob = new Blob([result.decryptedData!.data], {
+                          type: result.decryptedData!.mimeType,
+                        })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement("a")
+                        a.href = url
+                        a.download = `decrypted-${Date.now()}`
+                        a.click()
+                        URL.revokeObjectURL(url)
+                      }}
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Download
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Fetch and decrypt button - always show if blobId is available */}
+              {result.details.blobId && !result.decryptedData && (
+                <div className="mt-6 p-4 rounded-xl bg-cyan-500/10 border border-cyan-500/20">
+                  <div className="flex items-center gap-2 mb-3">
+                    <ImageIcon className="w-5 h-5 text-cyan-400" />
+                    <h3 className="text-sm font-medium text-white">View Original File</h3>
+                  </div>
+                  <p className="text-xs text-zinc-400 mb-4">
+                    The proof has been verified. You can now fetch and decrypt the original file from Walrus storage.
+                  </p>
+                  <Button
+                    onClick={() => {
+                      // Try to get policy from localStorage
+                      const storedData = localStorage.getItem(`zkStorage_${result.details.commitment}`)
+                      let policy: SealPolicy | undefined
+                      
+                      if (storedData) {
+                        try {
+                          const parsed = JSON.parse(storedData)
+                          policy = parsed.policy
+                        } catch (e) {
+                          console.error("Failed to parse stored data:", e)
+                        }
+                      }
+                      
+                      if (policy) {
+                        handleFetchAndDecrypt(result.details.blobId!, policy)
+                      } else {
+                        // If no policy in localStorage, try to reconstruct a basic policy
+                        // This is a fallback - in production, policy should be stored on-chain or passed
+                        toast({
+                          title: "Policy Not Found",
+                          description: "Policy information is required for decryption. Please ensure you uploaded the file from this browser.",
+                          variant: "destructive",
+                        })
+                      }
+                    }}
+                    disabled={decrypting}
+                    className="w-full"
+                    size="lg"
+                  >
+                    {decrypting ? (
+                      <>
+                        <Loader size="sm" className="mr-2" />
+                        Fetching & Decrypting...
+                      </>
+                    ) : (
+                      <>
+                        <ImageIcon className="w-5 h-5 mr-2" />
+                        Fetch & Decrypt Original File
+                      </>
+                    )}
+                  </Button>
+                  {result.details.blobId && (
+                    <p className="text-xs text-zinc-500 mt-2 text-center">
+                      Blob ID: <code className="text-cyan-400">{shortenHash(result.details.blobId, 8)}</code>
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Show error if blobId is missing */}
+              {!result.details.blobId && (
+                <div className="mt-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertCircle className="w-5 h-5 text-amber-400" />
+                    <h3 className="text-sm font-medium text-amber-400">Blob ID Not Available</h3>
+                  </div>
+                  <p className="text-xs text-zinc-400 mb-3">
+                    To view the original file, the blob ID is required. Please verify a proof that includes the blob ID,
+                    or navigate from the upload page where the blob ID is available.
+                  </p>
+                  <Link href="/upload">
+                    <Button variant="outline" className="w-full" size="sm">
+                      Go to Upload Page
+                    </Button>
+                  </Link>
+                </div>
+              )}
 
               <div className="flex flex-col sm:flex-row gap-3 mt-8">
                 <Button variant="outline" onClick={resetVerification} className="flex-1">

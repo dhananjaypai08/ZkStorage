@@ -34,9 +34,15 @@ import {
   formatProofForDisplay
 } from "@/lib/zk-prover"
 import { toast } from "@/lib/use-toast"
+import { useSignAndExecuteTransaction } from "@mysten/dapp-kit"
+import { buildCreateReceiptTx } from "@/lib/sui"
+import { useCurrentAccount } from "@mysten/dapp-kit"
+import { WalletButton } from "@/components/WalletButton"
 
 function ReceiptPageContent() {
   const searchParams = useSearchParams()
+  const account = useCurrentAccount()
+  const { mutate: signAndExecute, isPending: isExecuting } = useSignAndExecuteTransaction()
   const [commitment, setCommitment] = useState("")
   const [blobId, setBlobId] = useState("")
   const [policyId, setPolicyId] = useState("")
@@ -45,6 +51,7 @@ function ReceiptPageContent() {
   const [maxRetentionDays, setMaxRetentionDays] = useState(90)
   const [generating, setGenerating] = useState(false)
   const [proof, setProof] = useState<ProofBundle | null>(null)
+  const [receiptId, setReceiptId] = useState<string | null>(null)
 
   useEffect(() => {
     const c = searchParams.get("commitment")
@@ -151,6 +158,7 @@ function ReceiptPageContent() {
             <Link href="/verify" className="text-sm text-zinc-400 hover:text-white transition-colors">
               Verify
             </Link>
+            <WalletButton />
           </nav>
         </div>
       </header>
@@ -393,13 +401,96 @@ function ReceiptPageContent() {
                   <Download className="w-4 h-4 mr-2" />
                   Download Proof
                 </Button>
-                <Link href={`/verify?proof=${encodeURIComponent(JSON.stringify(proof))}`} className="flex-1">
-                  <Button className="w-full">
-                    Verify On-Chain
+                {commitment && blobId && policyId && (
+                  <Button
+                    onClick={() => {
+                      if (!account) {
+                        toast({
+                          title: "Wallet Not Connected",
+                          description: "Please connect your wallet to create an on-chain receipt",
+                          variant: "destructive",
+                        })
+                        return
+                      }
+
+                      const transaction = buildCreateReceiptTx({
+                        commitment,
+                        blobId,
+                        policyId,
+                        retentionDays,
+                        consentSigned: proofType === "consent",
+                      })
+
+                      signAndExecute(
+                        {
+                          transaction,
+                        },
+                        {
+                          onSuccess: (result) => {
+                            // Extract receipt ID from transaction result
+                            const receiptId = result.digest
+                            setReceiptId(receiptId)
+                            toast({
+                              title: "Receipt Created",
+                              description: "Storage receipt created on-chain successfully",
+                              variant: "success",
+                            })
+                          },
+                          onError: (error) => {
+                            toast({
+                              title: "Transaction Failed",
+                              description: error.message || "Failed to create receipt",
+                              variant: "destructive",
+                            })
+                          },
+                        }
+                      )
+                    }}
+                    disabled={isExecuting || !account}
+                    className="flex-1"
+                  >
+                    {isExecuting ? (
+                      <>
+                        <Loader size="sm" className="mr-2" />
+                        Creating Receipt...
+                      </>
+                    ) : (
+                      <>
+                        <Shield className="w-4 h-4 mr-2" />
+                        Create On-Chain Receipt
+                      </>
+                    )}
+                  </Button>
+                )}
+                <Link 
+                  href={`/verify?proof=${encodeURIComponent(JSON.stringify(proof))}${blobId ? `&blobId=${encodeURIComponent(blobId)}` : ''}${policyId ? `&policyId=${encodeURIComponent(policyId)}` : ''}`} 
+                  className="flex-1"
+                >
+                  <Button className="w-full" variant="outline">
+                    Verify Proof
                     <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
                 </Link>
               </div>
+              {receiptId && (
+                <div className="p-4 rounded-xl bg-cyan-500/10 border border-cyan-500/20">
+                  <p className="text-sm text-cyan-400 mb-2">Receipt Created On-Chain</p>
+                  <div className="flex items-center gap-2">
+                    <code className="text-xs text-white font-mono">{shortenHash(receiptId, 12)}</code>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => {
+                        navigator.clipboard.writeText(receiptId)
+                        toast({ title: "Copied", description: "Receipt ID copied to clipboard" })
+                      }}
+                    >
+                      <Copy className="w-3 h-3" />
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

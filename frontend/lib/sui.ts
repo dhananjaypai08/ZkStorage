@@ -4,12 +4,24 @@
  */
 
 import { getFullnodeUrl, SuiClient } from "@mysten/sui/client"
+import { Transaction } from "@mysten/sui/transactions"
+import { bcs } from "@mysten/sui/bcs"
 
 // Contract addresses (deployed to testnet)
-const PACKAGE_ID = "0xd4749f0c1da174bd60ce5b87027d5fbf995a9aa3d0078914ca02bda06ed909ca"
+// Package ID is set here - no .env needed unless you want to override it
+const PACKAGE_ID = (process.env.NEXT_PUBLIC_SUI_PACKAGE_ID || "0x0dbece3f879282e81274060838c48e6a9739a157aa14e91613e6128d13043554").toLowerCase()
 const STORAGE_RECEIPT_MODULE = "storage_receipt"
 const PROOF_VERIFIER_MODULE = "proof_verifier"
 const COMPLIANCE_LEDGER_MODULE = "compliance_ledger"
+
+// Validate package ID format
+if (!PACKAGE_ID || !PACKAGE_ID.startsWith("0x") || PACKAGE_ID.length !== 66) {
+  console.warn("⚠️ Invalid PACKAGE_ID format. Please deploy contracts and update the package ID.")
+} else {
+  console.log("✅ Package ID configured:", PACKAGE_ID)
+  console.log("📍 Network: testnet")
+  console.log("🔗 Verify at: https://suiscan.xyz/testnet/object/" + PACKAGE_ID)
+}
 
 export interface StorageReceipt {
   id: string
@@ -35,6 +47,46 @@ export interface ComplianceRecord {
  */
 export function createSuiClient(): SuiClient {
   return new SuiClient({ url: getFullnodeUrl("testnet") })
+}
+
+/**
+ * Verify that the package exists on-chain
+ */
+export async function verifyPackageExists(): Promise<{
+  exists: boolean
+  error?: string
+}> {
+  try {
+    const client = createSuiClient()
+    const packageObject = await client.getObject({
+      id: PACKAGE_ID,
+      options: {
+        showContent: true,
+        showType: true,
+      },
+    })
+
+    if (packageObject.data && packageObject.data.type === "package") {
+      return { exists: true }
+    }
+
+    return {
+      exists: false,
+      error: "Package object found but is not a package type",
+    }
+  } catch (error) {
+    return {
+      exists: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    }
+  }
+}
+
+/**
+ * Get the current package ID (for display/debugging)
+ */
+export function getPackageId(): string {
+  return PACKAGE_ID
 }
 
 /**
@@ -115,31 +167,53 @@ export async function getReceiptsByOwner(
 
 /**
  * Build transaction to create storage receipt
+ * Returns a Transaction compatible with dapp-kit
  */
 export function buildCreateReceiptTx(params: {
   commitment: string
   blobId: string
   policyId: string
   retentionDays: number
-}): {
-  packageId: string
-  module: string
-  function: string
-  arguments: (string | number)[]
-} {
-  const expiresAt = Date.now() + params.retentionDays * 24 * 60 * 60 * 1000
+  consentSigned?: boolean
+}): Transaction {
+  const consentSigned = params.consentSigned ?? false
+  const tx = new Transaction()
 
-  return {
-    packageId: PACKAGE_ID,
-    module: STORAGE_RECEIPT_MODULE,
-    function: "create_receipt",
+  // Ensure package ID is lowercase
+  const normalizedPackageId = PACKAGE_ID.toLowerCase()
+  
+  // Convert strings to bytes for vector<u8>
+  const commitmentBytes = new Uint8Array(new TextEncoder().encode(params.commitment))
+  const blobIdBytes = new Uint8Array(new TextEncoder().encode(params.blobId))
+  const policyIdBytes = new Uint8Array(new TextEncoder().encode(params.policyId))
+
+  // Build the move call target
+  const target = `${normalizedPackageId}::${STORAGE_RECEIPT_MODULE}::create_and_transfer_receipt`
+  
+  console.log("Building transaction:", {
+    packageId: normalizedPackageId,
+    target,
+    network: "testnet"
+  })
+
+  // Serialize vectors using BCS
+  const commitmentSerialized = bcs.vector(bcs.u8()).serialize(commitmentBytes)
+  const blobIdSerialized = bcs.vector(bcs.u8()).serialize(blobIdBytes)
+  const policyIdSerialized = bcs.vector(bcs.u8()).serialize(policyIdBytes)
+
+  tx.moveCall({
+    target,
     arguments: [
-      params.commitment,
-      params.blobId,
-      params.policyId,
-      expiresAt,
+      tx.pure(commitmentSerialized),
+      tx.pure(blobIdSerialized),
+      tx.pure(policyIdSerialized),
+      tx.pure.u64(params.retentionDays),
+      tx.pure.bool(consentSigned),
+      tx.object("0x6"), // Clock object
     ],
-  }
+  })
+
+  return tx
 }
 
 /**

@@ -1,8 +1,10 @@
 import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
+import "@mysten/dapp-kit/dist/index.css"
 import "./globals.css"
 import { TransitionOverlay } from "@/components/TransitionOverlay"
 import { Toaster } from "@/components/ui/toaster"
+import { WalletProvider } from "@/components/WalletProvider"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,9 +32,11 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-zinc-950 text-white min-h-screen`}
       >
-        <TransitionOverlay />
-        {children}
-        <Toaster />
+        <WalletProvider>
+          <TransitionOverlay />
+          {children}
+          <Toaster />
+        </WalletProvider>
       </body>
     </html>
   )

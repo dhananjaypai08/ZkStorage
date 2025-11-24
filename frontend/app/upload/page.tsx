@@ -29,6 +29,10 @@ import { createCommitmentWithMetadata } from "@/lib/merkle"
 import { createPolicy, encryptWithSeal, serializeEnvelope, type SealPolicy } from "@/lib/seal"
 import { uploadToWalrus, daysToEpochs } from "@/lib/walrus"
 import { toast } from "@/lib/use-toast"
+import { WalletButton } from "@/components/WalletButton"
+import { useSignAndExecuteTransaction } from "@mysten/dapp-kit"
+import { useCurrentAccount } from "@mysten/dapp-kit"
+import { buildCreateReceiptTx } from "@/lib/sui"
 
 type UploadStep = "select" | "configure" | "processing" | "complete"
 
@@ -45,6 +49,8 @@ interface UploadResult {
 }
 
 export default function UploadPage() {
+  const account = useCurrentAccount()
+  const { mutate: signAndExecute, isPending: isCreatingReceipt } = useSignAndExecuteTransaction()
   const [step, setStep] = useState<UploadStep>("select")
   const [file, setFile] = useState<File | null>(null)
   const [retentionDays, setRetentionDays] = useState(30)
@@ -55,6 +61,7 @@ export default function UploadPage() {
   const [result, setResult] = useState<UploadResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copiedField, setCopiedField] = useState<string | null>(null)
+  const [receiptId, setReceiptId] = useState<string | null>(null)
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -113,7 +120,7 @@ export default function UploadPage() {
       setStatusMessage("Finalizing...")
       setProgress(100)
 
-      setResult({
+      const uploadResult_data = {
         blobId: uploadResult.blobId,
         commitment: combinedCommitment,
         policyId: policy.id,
@@ -123,8 +130,26 @@ export default function UploadPage() {
         retentionDays,
         consentSigned,
         timestamp: Date.now(),
-      })
+      }
+
+      setResult(uploadResult_data)
       setStep("complete")
+
+      // Store policy and blob info in localStorage for later decryption
+      try {
+        localStorage.setItem(
+          `zkStorage_${combinedCommitment}`,
+          JSON.stringify({
+            blobId: uploadResult.blobId,
+            policyId: policy.id,
+            policy: policy,
+            fileName: file.name,
+            fileSize: file.size,
+          })
+        )
+      } catch (e) {
+        console.warn("Failed to store policy in localStorage:", e)
+      }
 
       toast({
         title: "Upload Complete",
@@ -186,6 +211,7 @@ export default function UploadPage() {
             <Link href="/verify" className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
               Verify
             </Link>
+            <WalletButton />
           </nav>
         </div>
       </header>
@@ -313,6 +339,14 @@ export default function UploadPage() {
                   </div>
                 </div>
 
+                {!account && (
+                  <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 mb-4">
+                    <p className="text-xs text-amber-400">
+                      💡 Connect your wallet to create an on-chain receipt after upload
+                    </p>
+                  </div>
+                )}
+
                 <Button onClick={handleUpload} className="w-full" disabled={processing}>
                   <Lock className="w-4 h-4 mr-2" />
                   Encrypt & Upload
@@ -431,10 +465,150 @@ export default function UploadPage() {
               </CardContent>
             </Card>
 
-            <div className="flex gap-3">
+            {/* Create On-Chain Receipt Section */}
+            {!receiptId && (
+              <div className="pt-4 border-t border-zinc-800/40">
+                <p className="text-xs text-zinc-500 mb-3">Create On-Chain Receipt</p>
+                {!account ? (
+                  <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                    <p className="text-xs text-amber-400 mb-2">
+                      Connect your wallet to create an on-chain receipt
+                    </p>
+                    <WalletButton />
+                  </div>
+                ) : (
+                  <>
+                    <div className="mb-3 p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+                      <p className="text-xs text-cyan-400">
+                        ⚠️ Make sure your wallet is on <strong>Testnet</strong> network
+                      </p>
+                    </div>
+                    <Button
+                    onClick={() => {
+                      if (!account) {
+                        toast({
+                          title: "Wallet Not Connected",
+                          description: "Please connect your wallet first",
+                          variant: "destructive",
+                        })
+                        return
+                      }
+
+                      const transaction = buildCreateReceiptTx({
+                        commitment: result.commitment,
+                        blobId: result.blobId,
+                        policyId: result.policyId,
+                        retentionDays: result.retentionDays,
+                        consentSigned: result.consentSigned,
+                      })
+
+                      signAndExecute(
+                        {
+                          transaction,
+                          options: {
+                            showEffects: true,
+                            showEvents: true,
+                          },
+                        },
+                        {
+                          onSuccess: (txResult) => {
+                            const txDigest = txResult.digest
+                            setReceiptId(txDigest)
+                            toast({
+                              title: "Receipt Created",
+                              description: "Storage receipt created successfully",
+                              variant: "success",
+                            })
+                          },
+                          onError: (error) => {
+                            console.error("Transaction error:", error)
+                            let errorMsg = error.message || "Failed to create receipt"
+                            
+                            // Check if it's a package/network issue
+                            if (errorMsg.includes("package") || errorMsg.includes("Package") || errorMsg.includes("unable to locate")) {
+                              errorMsg = "Package not found. Make sure your wallet is connected to Testnet network."
+                            }
+                            
+                            toast({
+                              title: "Transaction Failed",
+                              description: errorMsg,
+                              variant: "destructive",
+                            })
+                          },
+                        }
+                      )
+                    }}
+                    disabled={isCreatingReceipt}
+                    className="w-full"
+                  >
+                    {isCreatingReceipt ? (
+                      <>
+                        <Loader size="sm" className="mr-2" />
+                        Signing Transaction...
+                      </>
+                    ) : (
+                      <>
+                        <Shield className="w-4 h-4 mr-2" />
+                        Create On-Chain Receipt
+                      </>
+                    )}
+                  </Button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Receipt Created Success */}
+            {receiptId && (
+              <div className="pt-4 border-t border-zinc-800/40">
+                <div className="p-4 rounded-lg bg-gradient-to-br from-cyan-500/10 to-blue-500/10 border border-cyan-500/20">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center">
+                      <CheckCircle className="w-4 h-4 text-cyan-400" />
+                    </div>
+                    <p className="text-sm font-semibold text-white">✅ Receipt Created On-Chain</p>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 p-2 rounded bg-black/20">
+                      <span className="text-xs text-zinc-400">Transaction:</span>
+                      <code className="text-xs text-cyan-400 font-mono flex-1">{shortenHash(receiptId, 16)}</code>
+                      <button
+                        onClick={() => copyToClipboard(receiptId, "Transaction ID")}
+                        className="p-1 rounded hover:bg-zinc-800 transition-colors"
+                        title="Copy transaction ID"
+                      >
+                        <Copy className="w-3 h-3 text-zinc-500 hover:text-cyan-400" />
+                      </button>
+                    </div>
+                    <div className="flex gap-2">
+                      <a
+                        href={`https://suiscan.xyz/testnet/tx/${receiptId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-400 hover:bg-cyan-500/20 hover:border-cyan-500/40 transition-all"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        View on SuiScan
+                      </a>
+                      <a
+                        href={`https://suiexplorer.com/txblock/${receiptId}?network=testnet`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-xs text-white hover:bg-white/10 transition-all"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        Sui Explorer
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-4">
               <Link href={`/receipt?commitment=${result.commitment}&blobId=${result.blobId}&policyId=${result.policyId}`} className="flex-1">
-                <Button className="w-full">
-                  Generate ZK Receipt
+                <Button variant="outline" className="w-full">
+                  Generate ZK Proof
                   <ArrowRight className="w-4 h-4 ml-2" />
                 </Button>
               </Link>
