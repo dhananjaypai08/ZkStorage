@@ -30,8 +30,7 @@ import { createPolicy, encryptWithSeal, serializeEnvelope, type SealPolicy } fro
 import { uploadToWalrus, daysToEpochs } from "@/lib/walrus"
 import { toast } from "@/lib/use-toast"
 import { WalletDisplay } from "@/components/WalletDisplay"
-import { useSignAndExecuteTransaction } from "@mysten/dapp-kit"
-import { useCurrentAccount } from "@mysten/dapp-kit"
+import { useSignAndExecuteTransaction, useCurrentAccount, useCurrentWallet } from "@mysten/dapp-kit"
 import { buildCreateReceiptTx } from "@/lib/sui"
 
 type UploadStep = "select" | "configure" | "processing" | "complete"
@@ -50,6 +49,7 @@ interface UploadResult {
 
 export default function UploadPage() {
   const account = useCurrentAccount()
+  const wallet = useCurrentWallet()
   const { mutate: signAndExecute, isPending: isCreatingReceipt } = useSignAndExecuteTransaction()
   const [step, setStep] = useState<UploadStep>("select")
   const [file, setFile] = useState<File | null>(null)
@@ -477,7 +477,32 @@ export default function UploadPage() {
                     </p>
                     <WalletDisplay />
                   </div>
-                ) : (
+                ) : (() => {
+                  const currentNetwork = String(wallet?.currentWallet?.accounts?.[0]?.chains?.[0] || "")
+                  const isTestnet = currentNetwork === "sui:testnet" || currentNetwork === "testnet" || currentNetwork.includes("testnet")
+                  
+                  if (!isTestnet) {
+                    return (
+                      <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                        <div className="flex items-center gap-2 mb-2">
+                          <AlertCircle className="w-4 h-4 text-red-400" />
+                          <p className="text-xs font-medium text-red-400">
+                            Wrong Network Detected
+                          </p>
+                        </div>
+                        <p className="text-xs text-red-300 mb-3">
+                          Your wallet is on <strong>{currentNetwork || "unknown"}</strong> network. 
+                          Please switch to <strong>Testnet</strong> to create receipts.
+                        </p>
+                        <p className="text-xs text-zinc-400 mb-3">
+                          Package ID: <code className="text-cyan-400 font-mono text-[10px]">{process.env.NEXT_PUBLIC_SUI_PACKAGE_ID || "0x0a6363a395c02c2e59bd65cfa357b3e5a542a3420bf8c754e14531bfa4000c4f"}</code>
+                        </p>
+                        <WalletDisplay />
+                      </div>
+                    )
+                  }
+                  
+                  return (
                   <Button
                     onClick={async () => {
                       if (isExecutingRef.current) {
@@ -489,6 +514,19 @@ export default function UploadPage() {
                           title: "Wallet Not Connected",
                           description: "Please connect your wallet first",
                           variant: "destructive",
+                        })
+                        return
+                      }
+
+                      const walletNetwork = String(wallet?.currentWallet?.accounts?.[0]?.chains?.[0] || "")
+                      const isTestnet = walletNetwork === "sui:testnet" || walletNetwork === "testnet" || walletNetwork.includes("testnet")
+                      
+                      if (!isTestnet) {
+                        toast({
+                          title: "Wrong Network",
+                          description: `Your wallet is on ${walletNetwork || "unknown"} network. Please switch to Testnet in your wallet extension. The package (${process.env.NEXT_PUBLIC_SUI_PACKAGE_ID || "0x0a6363a395c02c2e59bd65cfa357b3e5a542a3420bf8c754e14531bfa4000c4f"}) is only deployed on Testnet.`,
+                          variant: "destructive",
+                          duration: 15000,
                         })
                         return
                       }
@@ -511,9 +549,31 @@ export default function UploadPage() {
                         return
                       }
 
+                      if (isExecutingRef.current) {
+                        console.warn("[Upload] Already executing, skipping")
+                        return
+                      }
+
                       isExecutingRef.current = true
 
                       try {
+                        if (!account?.address) {
+                          throw new Error("Account address is missing")
+                        }
+
+                        if (!wallet?.currentWallet) {
+                          throw new Error("Wallet is not connected")
+                        }
+                        const packageId = process.env.NEXT_PUBLIC_SUI_PACKAGE_ID || "0x0a6363a395c02c2e59bd65cfa357b3e5a542a3420bf8c754e14531bfa4000c4f"
+                        
+                        console.log("[Upload] Creating receipt transaction:", {
+                          packageId: packageId.substring(0, 20) + "...",
+                          walletNetwork,
+                          commitment: result.commitment.substring(0, 20) + "...",
+                          blobId: result.blobId.substring(0, 20) + "...",
+                          policyId: result.policyId.substring(0, 20) + "...",
+                        })
+
                         const txParams = {
                           commitment: String(result.commitment),
                           blobId: String(result.blobId),
@@ -526,16 +586,43 @@ export default function UploadPage() {
                           throw new Error("Missing required transaction parameters")
                         }
 
-                        const transaction = buildCreateReceiptTx(txParams)
+                        let transaction: any = null
+                        try {
+                          transaction = buildCreateReceiptTx(txParams)
+                        } catch (buildError) {
+                          console.error("[Upload] Transaction build error:", buildError)
+                          throw new Error(`Failed to build transaction: ${buildError instanceof Error ? buildError.message : String(buildError)}`)
+                        }
 
                         if (!transaction) {
-                          throw new Error("Failed to build transaction")
+                          throw new Error("Transaction is null after building")
+                        }
+
+                        if (typeof transaction !== "object") {
+                          throw new Error(`Transaction is not a valid object: ${typeof transaction}`)
+                        }
+
+                        console.log("[Upload] Transaction built successfully, type:", typeof transaction)
+                        console.log("[Upload] Executing transaction on sui:testnet")
+
+                        const transactionPayload = {
+                          transaction: transaction as unknown as Parameters<typeof signAndExecute>[0]['transaction'],
+                          chain: "sui:testnet" as const,
+                        }
+
+                        if (!transactionPayload.transaction) {
+                          throw new Error("Transaction payload is null")
+                        }
+
+                        console.log("[Upload] Calling signAndExecute with payload")
+                        console.log("[Upload] Transaction object keys:", Object.keys(transaction || {}))
+
+                        if (!signAndExecute) {
+                          throw new Error("signAndExecute function is not available")
                         }
 
                         signAndExecute(
-                          {
-                            transaction: transaction as unknown as Parameters<typeof signAndExecute>[0]['transaction'],
-                          },
+                          transactionPayload,
                           {
                             onSuccess: (txResult) => {
                               isExecutingRef.current = false
@@ -580,12 +667,44 @@ export default function UploadPage() {
                         )
                       } catch (err) {
                         isExecutingRef.current = false
-                        console.error("Transaction build error:", err)
-                        const errorMessage = err instanceof Error ? err.message : String(err || "Unknown error")
+                        console.error("[Upload] Catch block error:", err)
+                        console.error("[Upload] Error type:", typeof err)
+                        console.error("[Upload] Error stack:", err instanceof Error ? err.stack : "No stack trace")
+                        
+                        let errorMessage = "Unknown error occurred"
+                        
+                        try {
+                          if (err === null || err === undefined) {
+                            errorMessage = "Transaction failed: Error is null or undefined"
+                          } else if (err instanceof Error) {
+                            errorMessage = err.message || err.toString()
+                            if (err.stack) {
+                              console.error("[Upload] Full error stack:", err.stack)
+                            }
+                          } else if (typeof err === "string") {
+                            errorMessage = err
+                          } else if (typeof err === "object") {
+                            if ("message" in err) {
+                              errorMessage = String(err.message)
+                            } else {
+                              errorMessage = JSON.stringify(err)
+                            }
+                          } else {
+                            errorMessage = String(err)
+                          }
+                        } catch (parseError) {
+                          errorMessage = `Transaction error: ${String(err)}`
+                        }
+                        
+                        if (errorMessage.includes("parameters") || errorMessage.includes("null")) {
+                          errorMessage = "Transaction parameters error. Please ensure all upload data is complete and try again."
+                        }
+                        
                         toast({
                           title: "Transaction Error",
                           description: errorMessage,
                           variant: "destructive",
+                          duration: 10000,
                         })
                       }
                     }}
@@ -603,8 +722,9 @@ export default function UploadPage() {
                         Create On-Chain Receipt
                       </>
                     )}
-                  </Button>
-                )}
+                    </Button>
+                  )
+                })()}
               </div>
             )}
 

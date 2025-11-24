@@ -1,7 +1,7 @@
 import { getFullnodeUrl, SuiClient } from "@mysten/sui/client"
 import { Transaction } from "@mysten/sui/transactions"
 
-const PACKAGE_ID = (process.env.NEXT_PUBLIC_SUI_PACKAGE_ID || "0x0e0dafd65a12c710882eb586ac9fc76416497453a3fa3169c6468de1775f1a4f").toLowerCase()
+const PACKAGE_ID = (process.env.NEXT_PUBLIC_SUI_PACKAGE_ID || "0x0a6363a395c02c2e59bd65cfa357b3e5a542a3420bf8c754e14531bfa4000c4f").toLowerCase()
 const STORAGE_RECEIPT_MODULE = "storage_receipt"
 const PROOF_VERIFIER_MODULE = "proof_verifier"
 const COMPLIANCE_LEDGER_MODULE = "compliance_ledger"
@@ -160,6 +160,16 @@ export function buildCreateReceiptTx(params: {
     }
 
     const target = `${normalizedPackageId}::${STORAGE_RECEIPT_MODULE}::create_and_transfer_receipt`
+    
+    console.log("[buildCreateReceiptTx] Building transaction:", {
+      packageId: normalizedPackageId,
+      target,
+      commitmentLength: commitmentBytes.length,
+      blobIdLength: blobIdBytes.length,
+      policyIdLength: policyIdBytes.length,
+      retentionDays,
+      consentSigned,
+    })
 
     const tx = new Transaction()
     
@@ -167,23 +177,37 @@ export function buildCreateReceiptTx(params: {
       throw new Error("Failed to create Transaction object")
     }
 
-    const args = [
-      tx.pure("vector<u8>", commitmentBytes),
-      tx.pure("vector<u8>", blobIdBytes),
-      tx.pure("vector<u8>", policyIdBytes),
-      tx.pure.u64(BigInt(retentionDays)),
-      tx.pure.bool(consentSigned),
-      tx.object("0x6"),
-    ]
+    try {
+      const commitmentArg = tx.pure.vector("u8", commitmentBytes)
+      const blobIdArg = tx.pure.vector("u8", blobIdBytes)
+      const policyIdArg = tx.pure.vector("u8", policyIdBytes)
+      const retentionArg = tx.pure.u64(BigInt(retentionDays))
+      const consentArg = tx.pure.bool(consentSigned)
+      const clockArg = tx.object("0x6")
 
-    if (!args || args.length !== 6) {
-      throw new Error("Failed to build transaction arguments")
+      if (!commitmentArg || !blobIdArg || !policyIdArg || !retentionArg || !consentArg || !clockArg) {
+        throw new Error("One or more transaction arguments are null")
+      }
+
+      tx.moveCall({
+        target,
+        arguments: [
+          commitmentArg,
+          blobIdArg,
+          policyIdArg,
+          retentionArg,
+          consentArg,
+          clockArg,
+        ],
+      })
+    } catch (moveCallError) {
+      console.error("[buildCreateReceiptTx] moveCall error:", moveCallError)
+      throw new Error(`Failed to add moveCall to transaction: ${moveCallError instanceof Error ? moveCallError.message : String(moveCallError)}`)
     }
 
-    tx.moveCall({
-      target,
-      arguments: args,
-    })
+    if (!tx) {
+      throw new Error("Transaction object is null after moveCall")
+    }
 
     return tx
   } catch (error) {

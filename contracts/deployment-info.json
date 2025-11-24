@@ -1,6 +1,6 @@
 {
   "network": "testnet",
-  "packageId": "0x0e0dafd65a12c710882eb586ac9fc76416497453a3fa3169c6468de1775f1a4f",
+  "packageId": "0x0a6363a395c02c2e59bd65cfa357b3e5a542a3420bf8c754e14531bfa4000c4f",
   "deployedAt": "2025-01-24T00:00:00Z",
   "txDigest": "7K72zC2NTfxqEsemyNc6g7y3qDVHB7NUcRMF3kkdM7eF",
   "modules": [

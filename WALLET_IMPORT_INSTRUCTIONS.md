@@ -3,7 +3,7 @@
 ## Your Account Details
 
 **Address:** `0xce80cc3d453b2994691322674a2282c008716847f088c942c3113fe8e95ee9fa`  
-**Private Key:** `suiprivkey1qrc88xuqt5vvyw430h05alfe2r6rq4rw50nhxje3m4hq2rkwxcax2ekpenf`  
+**Private Key:** `suiprivkey.....`  
 **Network:** Testnet  
 **Balance:** ~19.83 SUI
 
@@ -18,7 +18,7 @@
 2. Click **"Import Private Key"** or **"Add Account"** → **"Import Private Key"**
 3. Paste this private key:
    ```
-   suiprivkey1qrc88xuqt5vvyw430h05alfe2r6rq4rw50nhxje3m4hq2rkwxcax2ekpenf
+   suiprivkey....
    ```
 4. Give it a name: `CLI Account` or `Testnet Deployer`
 5. Click **"Import"**
@@ -35,13 +35,11 @@
 
 ## Package Information
 
-**Package ID:** `0x0dbece3f879282e81274060838c48e6a9739a157aa14e91613e6128d13043554`  
+**Package ID:** `0x0a6363a395c02c2e59bd65cfa357b3e5a542a3420bf8c754e14531bfa4000c4f`  
 **Network:** Testnet  
-**Transaction:** `96CJ7GVs4HiDtswZWqMao2kHsQJWwuzYmwb6Q4bv6zzx`
 
 You can verify the package exists at:
-- SuiScan: https://suiscan.xyz/testnet/object/0x0dbece3f879282e81274060838c48e6a9739a157aa14e91613e6128d13043554
-- Sui Explorer: https://suiexplorer.com/object/0x0dbece3f879282e81274060838c48e6a9739a157aa14e91613e6128d13043554?network=testnet
+- SuiScan: https://suiscan.xyz/testnet/object/0x0a6363a395c02c2e59bd65cfa357b3e5a542a3420bf8c754e14531bfa4000c4f
 
 ## Troubleshooting
 
@@ -53,7 +51,7 @@ You can verify the package exists at:
    - Package was deployed to Testnet
 
 2. **Verify Package ID:**
-   - Must be exactly: `0x0dbece3f879282e81274060838c48e6a9739a157aa14e91613e6128d13043554`
+   - Must be exactly: `0x0a6363a395c02c2e59bd65cfa357b3e5a542a3420bf8c754e14531bfa4000c4f`
    - Case-sensitive, starts with lowercase `0x`
    - No spaces or extra characters
 

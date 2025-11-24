@@ -34,14 +34,14 @@ import {
   formatProofForDisplay
 } from "@/lib/zk-prover"
 import { toast } from "@/lib/use-toast"
-import { useSignAndExecuteTransaction } from "@mysten/dapp-kit"
+import { useSignAndExecuteTransaction, useCurrentAccount, useCurrentWallet } from "@mysten/dapp-kit"
 import { buildCreateReceiptTx } from "@/lib/sui"
-import { useCurrentAccount } from "@mysten/dapp-kit"
 import { WalletDisplay } from "@/components/WalletDisplay"
 
 function ReceiptPageContent() {
   const searchParams = useSearchParams()
   const account = useCurrentAccount()
+  const wallet = useCurrentWallet()
   const { mutate: signAndExecute, isPending: isExecuting } = useSignAndExecuteTransaction()
   const [commitment, setCommitment] = useState("")
   const [blobId, setBlobId] = useState("")
@@ -413,6 +413,19 @@ function ReceiptPageContent() {
                         return
                       }
 
+                      const currentNetwork = String(wallet?.currentWallet?.accounts?.[0]?.chains?.[0] || "")
+                      const isTestnet = currentNetwork === "sui:testnet" || currentNetwork === "testnet" || currentNetwork.includes("testnet")
+                      
+                      if (!isTestnet) {
+                        toast({
+                          title: "Wrong Network",
+                          description: "Please switch your wallet to Testnet network. The package is only deployed on Testnet.",
+                          variant: "destructive",
+                          duration: 10000,
+                        })
+                        return
+                      }
+
                       const transaction = buildCreateReceiptTx({
                         commitment,
                         blobId,
@@ -424,6 +437,7 @@ function ReceiptPageContent() {
                       signAndExecute(
                         {
                           transaction: transaction as unknown as Parameters<typeof signAndExecute>[0]['transaction'],
+                          chain: "sui:testnet",
                         },
                         {
                           onSuccess: (result) => {
