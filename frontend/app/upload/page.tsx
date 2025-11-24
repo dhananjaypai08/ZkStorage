@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback } from "react"
 import Link from "next/link"
 import { useDropzone } from "react-dropzone"
 import {
@@ -11,7 +11,6 @@ import {
   CheckCircle,
   ArrowLeft,
   ArrowRight,
-  Shield,
   Clock,
   AlertCircle,
   Copy,
@@ -30,8 +29,6 @@ import { createPolicy, encryptWithSeal, serializeEnvelope, type SealPolicy } fro
 import { uploadToWalrus, daysToEpochs } from "@/lib/walrus"
 import { toast } from "@/lib/use-toast"
 import { WalletDisplay } from "@/components/WalletDisplay"
-import { useSignAndExecuteTransaction, useCurrentAccount, useCurrentWallet } from "@mysten/dapp-kit"
-import { buildCreateReceiptTx } from "@/lib/sui"
 
 type UploadStep = "select" | "configure" | "processing" | "complete"
 
@@ -48,9 +45,6 @@ interface UploadResult {
 }
 
 export default function UploadPage() {
-  const account = useCurrentAccount()
-  const wallet = useCurrentWallet()
-  const { mutate: signAndExecute, isPending: isCreatingReceipt } = useSignAndExecuteTransaction()
   const [step, setStep] = useState<UploadStep>("select")
   const [file, setFile] = useState<File | null>(null)
   const [retentionDays, setRetentionDays] = useState(30)
@@ -61,8 +55,6 @@ export default function UploadPage() {
   const [result, setResult] = useState<UploadResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copiedField, setCopiedField] = useState<string | null>(null)
-  const [receiptId, setReceiptId] = useState<string | null>(null)
-  const isExecutingRef = useRef(false)
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -340,13 +332,6 @@ export default function UploadPage() {
                   </div>
                 </div>
 
-                {!account && (
-                  <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 mb-4">
-                    <p className="text-xs text-amber-400">
-                      💡 Connect your wallet to create an on-chain receipt after upload
-                    </p>
-                  </div>
-                )}
 
                 <Button onClick={handleUpload} className="w-full" disabled={processing}>
                   <Lock className="w-4 h-4 mr-2" />
@@ -359,44 +344,88 @@ export default function UploadPage() {
 
         {/* Processing */}
         {step === "processing" && (
-          <Card className="border-zinc-800/60 bg-zinc-900/30">
-            <CardContent className="py-16">
-              <div className="text-center space-y-6">
-                <Loader size="lg" variant="spin" className="mx-auto" />
-                <div>
-                  <p className="text-sm text-zinc-300 mb-3">{statusMessage}</p>
-                  <ProgressBar progress={progress} showLabel className="max-w-xs mx-auto" />
-                </div>
-                <div className="flex justify-center gap-6 pt-4">
-                  {[
-                    { icon: FileText, label: "Commit", threshold: 25 },
-                    { icon: Lock, label: "Encrypt", threshold: 55 },
-                    { icon: Database, label: "Store", threshold: 100 },
-                  ].map(({ icon: Icon, label, threshold }) => (
-                    <div key={label} className="text-center">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center mx-auto mb-1.5 transition-colors ${
-                        progress >= threshold ? "bg-cyan-500/20 text-cyan-400" : "bg-zinc-800 text-zinc-600"
-                      }`}>
-                        <Icon className="w-4 h-4" />
+          <div className="space-y-8">
+            <Card className="border-zinc-800/60 bg-gradient-to-br from-zinc-900/50 to-zinc-800/30 backdrop-blur-sm overflow-hidden">
+              <CardContent className="py-20">
+                <div className="text-center space-y-8">
+                  <div className="relative mx-auto w-24 h-24">
+                    <div className="absolute inset-0 rounded-full bg-gradient-to-r from-cyan-500/20 via-blue-500/20 to-cyan-500/20 animate-spin" style={{ animationDuration: '3s' }} />
+                    <div className="absolute inset-2 rounded-full bg-zinc-900/80 backdrop-blur-sm flex items-center justify-center">
+                      <div className="relative">
+                        <Lock className="w-10 h-10 text-cyan-400 animate-pulse" />
+                        <div className="absolute inset-0 bg-cyan-400/20 rounded-full blur-xl animate-ping" />
                       </div>
-                      <p className="text-xs text-zinc-500">{label}</p>
                     </div>
-                  ))}
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <h2 className="text-2xl font-semibold bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
+                      {statusMessage || "Processing..."}
+                    </h2>
+                    <ProgressBar progress={progress} showLabel className="max-w-md mx-auto" />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-8 pt-8">
+                    {[
+                      { icon: FileText, label: "Creating Commitment", threshold: 25, color: "from-purple-500/20 to-purple-600/20" },
+                      { icon: Lock, label: "Encrypting Data", threshold: 55, color: "from-cyan-500/20 to-cyan-600/20" },
+                      { icon: Database, label: "Storing Securely", threshold: 100, color: "from-blue-500/20 to-blue-600/20" },
+                    ].map(({ icon: Icon, label, threshold, color }) => (
+                      <div key={label} className="text-center space-y-3">
+                        <div className={`relative mx-auto w-16 h-16 rounded-2xl flex items-center justify-center transition-all duration-500 ${
+                          progress >= threshold 
+                            ? `bg-gradient-to-br ${color} border-2 border-cyan-400/50 shadow-lg shadow-cyan-500/20 scale-110` 
+                            : "bg-zinc-800/50 border border-zinc-700/50"
+                        }`}>
+                          <Icon className={`w-6 h-6 transition-colors ${
+                            progress >= threshold ? "text-cyan-400" : "text-zinc-600"
+                          }`} />
+                          {progress >= threshold && (
+                            <div className="absolute -top-1 -right-1 w-4 h-4 bg-cyan-400 rounded-full animate-pulse" />
+                          )}
+                        </div>
+                        <div>
+                          <p className={`text-xs font-medium transition-colors ${
+                            progress >= threshold ? "text-cyan-400" : "text-zinc-500"
+                          }`}>
+                            {label}
+                          </p>
+                          {progress >= threshold && (
+                            <p className="text-[10px] text-cyan-400/70 mt-1">✓ Complete</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="pt-6 space-y-2">
+                    <div className="flex items-center justify-center gap-2 text-xs text-zinc-500">
+                      <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                      <span>Your data is being encrypted and stored securely</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         )}
 
         {/* Complete */}
         {step === "complete" && result && (
           <div className="space-y-6">
-            <div className="text-center space-y-3">
-              <div className="w-12 h-12 rounded-full bg-cyan-500/10 flex items-center justify-center mx-auto">
-                <CheckCircle className="w-6 h-6 text-cyan-400" />
+            <div className="text-center space-y-4">
+              <div className="relative mx-auto w-20 h-20">
+                <div className="absolute inset-0 rounded-full bg-gradient-to-r from-cyan-500/20 via-blue-500/20 to-cyan-500/20 animate-pulse" />
+                <div className="absolute inset-2 rounded-full bg-gradient-to-br from-cyan-500/10 to-blue-500/10 flex items-center justify-center border-2 border-cyan-500/30">
+                  <CheckCircle className="w-10 h-10 text-cyan-400" />
+                </div>
               </div>
-              <h1 className="text-xl font-medium text-white">Upload Complete</h1>
-              <p className="text-sm text-zinc-500">Encrypted and stored securely</p>
+              <div>
+                <h1 className="text-2xl font-semibold bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
+                  Upload Complete! 🎉
+                </h1>
+                <p className="text-sm text-zinc-400 mt-2">Your data has been encrypted and stored securely</p>
+              </div>
             </div>
 
             <Card className="border-zinc-800/60 bg-zinc-900/30">
@@ -435,334 +464,15 @@ export default function UploadPage() {
                   </Badge>
                   {result.consentSigned && (
                     <Badge variant="outline" className="text-xs">
-                      <Shield className="w-3 h-3 mr-1" />
+                      <CheckCircle className="w-3 h-3 mr-1" />
                       Consent
                     </Badge>
                   )}
                 </div>
 
-                {/* Explorer Links */}
-                <div className="pt-4 border-t border-zinc-800/40 space-y-2">
-                  <p className="text-xs text-zinc-500 mb-2">View on Explorer</p>
-                  <a
-                    href={`https://aggregator.walrus-testnet.walrus.space/v1/blobs/${result.blobId}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-xs text-cyan-400/70 hover:text-cyan-400 transition-colors"
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                    View blob on Walrus
-                  </a>
-                  <a
-                    href={`https://suiscan.xyz/testnet/object/${result.blobId}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-xs text-cyan-400/70 hover:text-cyan-400 transition-colors"
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                    View on SuiScan (if on-chain)
-                  </a>
-                </div>
               </CardContent>
             </Card>
 
-            {/* Create On-Chain Receipt Section */}
-            {!receiptId && result && result.commitment && result.blobId && result.policyId && (
-              <div className="pt-4 border-t border-zinc-800/40">
-                <p className="text-xs text-zinc-500 mb-3">Create On-Chain Receipt</p>
-                {!account ? (
-                  <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                    <p className="text-xs text-amber-400 mb-2">
-                      Connect your wallet to create an on-chain receipt
-                    </p>
-                    <WalletDisplay />
-                  </div>
-                ) : (() => {
-                  const currentNetwork = String(wallet?.currentWallet?.accounts?.[0]?.chains?.[0] || "")
-                  const isTestnet = currentNetwork === "sui:testnet" || currentNetwork === "testnet" || currentNetwork.includes("testnet")
-                  
-                  if (!isTestnet) {
-                    return (
-                      <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
-                        <div className="flex items-center gap-2 mb-2">
-                          <AlertCircle className="w-4 h-4 text-red-400" />
-                          <p className="text-xs font-medium text-red-400">
-                            Wrong Network Detected
-                          </p>
-                        </div>
-                        <p className="text-xs text-red-300 mb-3">
-                          Your wallet is on <strong>{currentNetwork || "unknown"}</strong> network. 
-                          Please switch to <strong>Testnet</strong> to create receipts.
-                        </p>
-                        <p className="text-xs text-zinc-400 mb-3">
-                          Package ID: <code className="text-cyan-400 font-mono text-[10px]">{process.env.NEXT_PUBLIC_SUI_PACKAGE_ID || "0x0a6363a395c02c2e59bd65cfa357b3e5a542a3420bf8c754e14531bfa4000c4f"}</code>
-                        </p>
-                        <WalletDisplay />
-                      </div>
-                    )
-                  }
-                  
-                  return (
-                  <Button
-                    onClick={async () => {
-                      if (isExecutingRef.current) {
-                        return
-                      }
-
-                      if (!account) {
-                        toast({
-                          title: "Wallet Not Connected",
-                          description: "Please connect your wallet first",
-                          variant: "destructive",
-                        })
-                        return
-                      }
-
-                      const walletNetwork = String(wallet?.currentWallet?.accounts?.[0]?.chains?.[0] || "")
-                      const isTestnet = walletNetwork === "sui:testnet" || walletNetwork === "testnet" || walletNetwork.includes("testnet")
-                      
-                      if (!isTestnet) {
-                        toast({
-                          title: "Wrong Network",
-                          description: `Your wallet is on ${walletNetwork || "unknown"} network. Please switch to Testnet in your wallet extension. The package (${process.env.NEXT_PUBLIC_SUI_PACKAGE_ID || "0x0a6363a395c02c2e59bd65cfa357b3e5a542a3420bf8c754e14531bfa4000c4f"}) is only deployed on Testnet.`,
-                          variant: "destructive",
-                          duration: 15000,
-                        })
-                        return
-                      }
-
-                      if (!result) {
-                        toast({
-                          title: "No Upload Result",
-                          description: "Please complete the upload process first",
-                          variant: "destructive",
-                        })
-                        return
-                      }
-
-                      if (!result.commitment || !result.blobId || !result.policyId) {
-                        toast({
-                          title: "Invalid Upload Data",
-                          description: "Missing required data from upload. Please try uploading again.",
-                          variant: "destructive",
-                        })
-                        return
-                      }
-
-                      if (isExecutingRef.current) {
-                        console.warn("[Upload] Already executing, skipping")
-                        return
-                      }
-
-                      isExecutingRef.current = true
-
-                      try {
-                        if (!account?.address) {
-                          throw new Error("Account address is missing")
-                        }
-
-                        if (!wallet?.currentWallet) {
-                          throw new Error("Wallet is not connected")
-                        }
-                        const packageId = process.env.NEXT_PUBLIC_SUI_PACKAGE_ID || "0x0a6363a395c02c2e59bd65cfa357b3e5a542a3420bf8c754e14531bfa4000c4f"
-                        
-                        console.log("[Upload] Creating receipt transaction:", {
-                          packageId: packageId.substring(0, 20) + "...",
-                          walletNetwork,
-                          commitment: result.commitment.substring(0, 20) + "...",
-                          blobId: result.blobId.substring(0, 20) + "...",
-                          policyId: result.policyId.substring(0, 20) + "...",
-                        })
-
-                        const txParams = {
-                          commitment: String(result.commitment),
-                          blobId: String(result.blobId),
-                          policyId: String(result.policyId),
-                          retentionDays: Number(result.retentionDays) || 30,
-                          consentSigned: Boolean(result.consentSigned),
-                        }
-
-                        if (!txParams.commitment || !txParams.blobId || !txParams.policyId) {
-                          throw new Error("Missing required transaction parameters")
-                        }
-
-                        let transaction: any = null
-                        try {
-                          transaction = buildCreateReceiptTx(txParams)
-                        } catch (buildError) {
-                          console.error("[Upload] Transaction build error:", buildError)
-                          throw new Error(`Failed to build transaction: ${buildError instanceof Error ? buildError.message : String(buildError)}`)
-                        }
-
-                        if (!transaction) {
-                          throw new Error("Transaction is null after building")
-                        }
-
-                        if (typeof transaction !== "object") {
-                          throw new Error(`Transaction is not a valid object: ${typeof transaction}`)
-                        }
-
-                        console.log("[Upload] Transaction built successfully, type:", typeof transaction)
-                        console.log("[Upload] Executing transaction on sui:testnet")
-
-                        const transactionPayload = {
-                          transaction: transaction as unknown as Parameters<typeof signAndExecute>[0]['transaction'],
-                          chain: "sui:testnet" as const,
-                        }
-
-                        if (!transactionPayload.transaction) {
-                          throw new Error("Transaction payload is null")
-                        }
-
-                        console.log("[Upload] Calling signAndExecute with payload")
-                        console.log("[Upload] Transaction object keys:", Object.keys(transaction || {}))
-
-                        if (!signAndExecute) {
-                          throw new Error("signAndExecute function is not available")
-                        }
-
-                        signAndExecute(
-                          transactionPayload,
-                          {
-                            onSuccess: (txResult) => {
-                              isExecutingRef.current = false
-                              if (!txResult || !txResult.digest) {
-                                throw new Error("Invalid transaction result")
-                              }
-                              const txDigest = txResult.digest
-                              setReceiptId(txDigest)
-                              toast({
-                                title: "Receipt Created",
-                                description: "Storage receipt created successfully",
-                                variant: "success",
-                              })
-                            },
-                            onError: (error) => {
-                              isExecutingRef.current = false
-                              console.error("Transaction error:", error)
-                              let errorMsg = "Failed to create receipt"
-                              
-                              if (error && typeof error === "object") {
-                                if ("message" in error && error.message) {
-                                  errorMsg = String(error.message)
-                                } else if ("toString" in error) {
-                                  errorMsg = String(error)
-                                }
-                              } else if (error) {
-                                errorMsg = String(error)
-                              }
-                              
-                              if (errorMsg.includes("package") || errorMsg.includes("Package") || errorMsg.includes("unable to locate") || errorMsg.includes("not found")) {
-                                errorMsg = "Package not found. Ensure your wallet is on Testnet network."
-                              }
-                              
-                              toast({
-                                title: "Transaction Failed",
-                                description: errorMsg,
-                                variant: "destructive",
-                                duration: 8000,
-                              })
-                            },
-                          }
-                        )
-                      } catch (err) {
-                        isExecutingRef.current = false
-                        console.error("[Upload] Catch block error:", err)
-                        console.error("[Upload] Error type:", typeof err)
-                        console.error("[Upload] Error stack:", err instanceof Error ? err.stack : "No stack trace")
-                        
-                        let errorMessage = "Unknown error occurred"
-                        
-                        try {
-                          if (err === null || err === undefined) {
-                            errorMessage = "Transaction failed: Error is null or undefined"
-                          } else if (err instanceof Error) {
-                            errorMessage = err.message || err.toString()
-                            if (err.stack) {
-                              console.error("[Upload] Full error stack:", err.stack)
-                            }
-                          } else if (typeof err === "string") {
-                            errorMessage = err
-                          } else if (typeof err === "object") {
-                            if ("message" in err) {
-                              errorMessage = String(err.message)
-                            } else {
-                              errorMessage = JSON.stringify(err)
-                            }
-                          } else {
-                            errorMessage = String(err)
-                          }
-                        } catch (parseError) {
-                          errorMessage = `Transaction error: ${String(err)}`
-                        }
-                        
-                        if (errorMessage.includes("parameters") || errorMessage.includes("null")) {
-                          errorMessage = "Transaction parameters error. Please ensure all upload data is complete and try again."
-                        }
-                        
-                        toast({
-                          title: "Transaction Error",
-                          description: errorMessage,
-                          variant: "destructive",
-                          duration: 10000,
-                        })
-                      }
-                    }}
-                    disabled={isCreatingReceipt || isExecutingRef.current}
-                    className="w-full"
-                  >
-                    {isCreatingReceipt ? (
-                      <>
-                        <Loader size="sm" className="mr-2" />
-                        Signing Transaction...
-                      </>
-                    ) : (
-                      <>
-                        <Shield className="w-4 h-4 mr-2" />
-                        Create On-Chain Receipt
-                      </>
-                    )}
-                    </Button>
-                  )
-                })()}
-              </div>
-            )}
-
-            {/* Receipt Created Success */}
-            {receiptId && (
-              <div className="pt-4 border-t border-zinc-800/40">
-                <div className="p-4 rounded-lg bg-gradient-to-br from-cyan-500/10 to-blue-500/10 border border-cyan-500/20">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center">
-                      <CheckCircle className="w-4 h-4 text-cyan-400" />
-                    </div>
-                    <p className="text-sm font-semibold text-white">✅ Receipt Created On-Chain</p>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 p-2 rounded bg-black/20">
-                      <span className="text-xs text-zinc-400">Transaction:</span>
-                      <code className="text-xs text-cyan-400 font-mono flex-1">{shortenHash(receiptId, 16)}</code>
-                      <button
-                        onClick={() => copyToClipboard(receiptId, "Transaction ID")}
-                        className="p-1 rounded hover:bg-zinc-800 transition-colors"
-                        title="Copy transaction ID"
-                      >
-                        <Copy className="w-3 h-3 text-zinc-500 hover:text-cyan-400" />
-                      </button>
-                    </div>
-                    <button
-                      onClick={() => {
-                        window.open(`https://suiscan.xyz/testnet/tx/${receiptId}`, '_blank', 'noopener,noreferrer')
-                      }}
-                      className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-400 hover:bg-cyan-500/20 hover:border-cyan-500/40 transition-all"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      View on SuiScan
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
 
             <div className="flex gap-3 pt-4">
               <Link href={`/receipt?commitment=${result.commitment}&blobId=${result.blobId}&policyId=${result.policyId}`} className="flex-1">

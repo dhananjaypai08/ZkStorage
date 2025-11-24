@@ -178,26 +178,15 @@ export function buildCreateReceiptTx(params: {
     }
 
     try {
-      const commitmentArg = tx.pure.vector("u8", commitmentBytes)
-      const blobIdArg = tx.pure.vector("u8", blobIdBytes)
-      const policyIdArg = tx.pure.vector("u8", policyIdBytes)
-      const retentionArg = tx.pure.u64(BigInt(retentionDays))
-      const consentArg = tx.pure.bool(consentSigned)
-      const clockArg = tx.object("0x6")
-
-      if (!commitmentArg || !blobIdArg || !policyIdArg || !retentionArg || !consentArg || !clockArg) {
-        throw new Error("One or more transaction arguments are null")
-      }
-
       tx.moveCall({
         target,
         arguments: [
-          commitmentArg,
-          blobIdArg,
-          policyIdArg,
-          retentionArg,
-          consentArg,
-          clockArg,
+          tx.pure("vector<u8>", commitmentBytes),
+          tx.pure("vector<u8>", blobIdBytes),
+          tx.pure("vector<u8>", policyIdBytes),
+          tx.pure.u64(BigInt(retentionDays)),
+          tx.pure.bool(consentSigned),
+          tx.object("0x6"),
         ],
       })
     } catch (moveCallError) {
