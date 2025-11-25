@@ -1,0 +1,14 @@
+# Circuit compilation artifacts
+*.zkey
+*.wasm
+*.r1cs
+*.sym
+
+# Build directory
+build/
+
+# Node modules
+node_modules/
+
+# Logs
+*.log

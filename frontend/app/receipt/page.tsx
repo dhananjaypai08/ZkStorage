@@ -80,7 +80,7 @@ function ReceiptPageContent() {
 
       switch (proofType) {
         case "storage":
-          inputs = generateStorageProofInputs(commitment, blobId || commitment, policyId || commitment)
+          inputs = await generateStorageProofInputs(commitment, blobId || commitment, policyId || commitment)
           break
         case "retention":
           inputs = generateRetentionProofInputs(commitment, retentionDays, maxRetentionDays, Date.now())
