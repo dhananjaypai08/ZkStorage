@@ -6,6 +6,7 @@
 import * as snarkjs from "snarkjs"
 // @ts-ignore - circomlibjs doesn't have types
 import { buildPoseidon } from "circomlibjs"
+import type { SealPolicy } from "./seal"
 
 // Cached Poseidon instance
 let poseidonInstance: any = null
@@ -69,6 +70,9 @@ export interface ProofBundle {
   commitment: string
   proofType: "storage" | "retention" | "consent" | "threshold"
   timestamp: number
+  blobId?: string
+  policyId?: string
+  policy?: SealPolicy
 }
 
 /**
@@ -241,7 +245,8 @@ async function loadCircuitArtifacts(proofType: ProofBundle["proofType"]) {
  */
 export async function generateProof(
   proofType: ProofBundle["proofType"],
-  inputs: Record<string, string>
+  inputs: Record<string, string>,
+  metadata?: { blobId?: string; policyId?: string; policy?: SealPolicy }
 ): Promise<ProofBundle> {
   try {
     // Load circuit artifacts
@@ -275,12 +280,15 @@ export async function generateProof(
       commitment: inputs.commitment,
       proofType,
       timestamp: Date.now(),
+      blobId: metadata?.blobId,
+      policyId: metadata?.policyId,
+      policy: metadata?.policy,
     }
   } catch (error) {
     console.error("❌ Real proof generation failed:", error)
     // Fallback to simulated proof for development
     console.warn("⚠️ Falling back to simulated proof")
-    return generateSimulatedProof(proofType, inputs)
+    return generateSimulatedProof(proofType, inputs, metadata)
   }
 }
 
@@ -289,7 +297,8 @@ export async function generateProof(
  */
 async function generateSimulatedProof(
   proofType: ProofBundle["proofType"],
-  inputs: Record<string, string>
+  inputs: Record<string, string>,
+  metadata?: { blobId?: string; policyId?: string; policy?: SealPolicy }
 ): Promise<ProofBundle> {
   console.warn("Using simulated proof - circuit artifacts not available")
 
@@ -325,6 +334,9 @@ async function generateSimulatedProof(
     commitment: inputs.commitment,
     proofType,
     timestamp: Date.now(),
+    blobId: metadata?.blobId,
+    policyId: metadata?.policyId,
+    policy: metadata?.policy,
   }
 }
 

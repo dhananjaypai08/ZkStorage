@@ -93,7 +93,23 @@ function ReceiptPageContent() {
           break
       }
 
-      const result = await generateProof(proofType, inputs)
+      // Retrieve policy from localStorage if available
+      let policy = undefined
+      try {
+        const storedData = localStorage.getItem(`zkStorage_${commitment}`)
+        if (storedData) {
+          const parsed = JSON.parse(storedData)
+          policy = parsed.policy
+        }
+      } catch (e) {
+        console.warn("Failed to retrieve policy from localStorage:", e)
+      }
+
+      const result = await generateProof(proofType, inputs, {
+        blobId: blobId || undefined,
+        policyId: policyId || undefined,
+        policy: policy,
+      })
       setProof(result)
 
       toast({

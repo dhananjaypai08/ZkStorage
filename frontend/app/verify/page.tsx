@@ -123,18 +123,20 @@ function VerifyPageContent() {
       // Step 4: Verify on-chain
       setProgress(80)
       const client = createSuiClient()
-      
-      // Try to get blobId and policyId from multiple sources:
-      // 1. Manually entered (from state - highest priority)
-      // 2. URL parameters
-      // 3. localStorage (from upload)
-      // 4. Proof metadata (if included)
-      let blobId: string | undefined = blobIdFromUrl || undefined
-      let policyId: string | undefined = policyIdFromUrl || undefined
-      let policy: SealPolicy | undefined
 
-      // If not manually entered, try localStorage
-      if (!blobId || !policyId) {
+      // Try to get blobId, policyId, and policy from multiple sources:
+      // 1. Proof metadata (if included) - highest priority
+      // 2. Manually entered (from state)
+      // 3. URL parameters
+      // 4. localStorage (from upload) - fallback
+      let blobId: string | undefined = proof.blobId || blobIdFromUrl || undefined
+      let policyId: string | undefined = proof.policyId || policyIdFromUrl || undefined
+      let policy: SealPolicy | undefined = proof.policy
+
+      console.log(`📦 Extracted from proof - blobId: ${blobId}, policyId: ${policyId}, policy: ${policy ? "✓" : "✗"}`)
+
+      // If policy not in proof, try to get from localStorage (fallback)
+      if (!policy) {
         const storedData = localStorage.getItem(`zkStorage_${proof.commitment}`)
         if (storedData) {
           try {
@@ -142,19 +144,9 @@ function VerifyPageContent() {
             blobId = blobId || parsed.blobId
             policyId = policyId || parsed.policyId
             policy = parsed.policy
+            console.log(`📦 Retrieved from localStorage - policy: ${policy ? "✓" : "✗"}`)
           } catch (e) {
             console.warn("Failed to parse stored data:", e)
-          }
-        }
-      } else {
-        // If we have blobId and policyId, try to get policy from localStorage
-        const storedData = localStorage.getItem(`zkStorage_${proof.commitment}`)
-        if (storedData) {
-          try {
-            const parsed = JSON.parse(storedData)
-            policy = parsed.policy
-          } catch (e) {
-            console.warn("Failed to parse stored policy:", e)
           }
         }
       }
